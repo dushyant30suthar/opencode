@@ -117,6 +117,9 @@ async function spawnRouter(): Promise<boolean> {
         "--models-dir",
         MODELS_DIR,
         ...(preset ? ["--models-preset", preset] : []),
+        // swap models instead of stacking them in VRAM (2x16GB fits ~one 30B-class model)
+        "--models-max",
+        "1",
         "--host",
         "127.0.0.1",
         "--port",
