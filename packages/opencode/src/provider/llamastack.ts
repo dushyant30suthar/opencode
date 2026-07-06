@@ -133,6 +133,20 @@ async function generatePresets(): Promise<string | undefined> {
   return preset
 }
 
+/**
+ * Global router settings sidecar (~/.local/state/llamastack/server.json),
+ * managed by the TUI's /config screen. Default: exposed on the LAN.
+ */
+async function routerHost(): Promise<string> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(STATE_DIR, "server.json"), "utf8"))
+    if (parsed?.expose === false) return "127.0.0.1"
+  } catch {
+    // missing or malformed — use the default
+  }
+  return "0.0.0.0"
+}
+
 async function spawnRouter(): Promise<boolean> {
   const stat = await fs.stat(LLAMA_SERVER_BIN).catch(() => undefined)
   if (!stat?.isFile()) return false
@@ -150,7 +164,7 @@ async function spawnRouter(): Promise<boolean> {
         "--models-max",
         "1",
         "--host",
-        "127.0.0.1",
+        await routerHost(),
         "--port",
         "9337",
       ],
@@ -161,6 +175,8 @@ async function spawnRouter(): Promise<boolean> {
     )
     child.on("error", () => {})
     child.unref()
+    // pidfile lets the TUI restart the detached router when settings change
+    if (child.pid) await fs.writeFile(path.join(STATE_DIR, "router.pid"), `${child.pid}\n`).catch(() => {})
     return true
   } catch {
     return false

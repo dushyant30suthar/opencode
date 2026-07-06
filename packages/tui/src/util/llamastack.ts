@@ -1,6 +1,8 @@
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { spawn } from "child_process"
+import { createSignal } from "solid-js"
 
 /**
  * Helpers for the llamastack provider's per-model settings file
@@ -10,10 +12,14 @@ import path from "path"
  */
 
 export const MODELS_DIR = "/home/dushyant30suthar/.lmstudio/models"
-export const ROUTER_BASE = "http://127.0.0.1:9337"
+export const LLAMA_SERVER_BIN = "/home/dushyant30suthar/Projects/llama/llama.cpp/build/bin/llama-server"
+export const ROUTER_PORT = 9337
+export const ROUTER_BASE = `http://127.0.0.1:${ROUTER_PORT}`
 
 const STATE_DIR = path.join(os.homedir(), ".local", "state", "llamastack")
 export const PRESET_PATH = path.join(STATE_DIR, "models.ini")
+export const SERVER_SETTINGS_PATH = path.join(STATE_DIR, "server.json")
+export const PID_PATH = path.join(STATE_DIR, "router.pid")
 
 const PRESET_HEADER = [
   "version = 1",
@@ -145,6 +151,15 @@ export async function discoverLocalModels(): Promise<LocalModelFile[]> {
   return result
 }
 
+/** Managed-key defaults for models without a models.ini section — same as generatePresets(). */
+export const DEFAULT_MODEL_SETTINGS: Record<string, string> = {
+  "ctx-size": "32768",
+  "gpu-layers": "99",
+  "flash-attn": "on",
+  "cache-type-k": "q8_0",
+  "cache-type-v": "q8_0",
+}
+
 /** Default section for a newly configured model — same defaults as generatePresets(). */
 export function defaultSection(discovered: LocalModelFile): IniSection {
   return {
@@ -247,4 +262,190 @@ export async function reloadRouter(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export type ServerSettings = {
+  /** Bind the router to 0.0.0.0 so other machines on the LAN can use it. */
+  expose: boolean
+}
+
+/** Global router settings sidecar (~/.local/state/llamastack/server.json). Default: exposed. */
+export async function loadServerSettings(): Promise<ServerSettings> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(SERVER_SETTINGS_PATH, "utf8"))
+    return { expose: typeof parsed?.expose === "boolean" ? parsed.expose : true }
+  } catch {
+    return { expose: true }
+  }
+}
+
+const [serverSettingsSignal, setServerSettingsSignal] = createSignal<ServerSettings>()
+let serverSettingsRequested = false
+
+/** Reactive view of the server settings; lazily loaded from disk on first read. */
+export function serverSettings(): ServerSettings | undefined {
+  if (!serverSettingsRequested) {
+    serverSettingsRequested = true
+    void loadServerSettings().then(setServerSettingsSignal)
+  }
+  return serverSettingsSignal()
+}
+
+export async function saveServerSettings(settings: ServerSettings): Promise<void> {
+  await fs.mkdir(STATE_DIR, { recursive: true })
+  await fs.writeFile(SERVER_SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n")
+  setServerSettingsSignal(settings)
+}
+
+/** First non-internal IPv4 address, e.g. the machine's LAN IP. */
+export function lanAddress(): string | undefined {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === "IPv4" && !entry.internal) return entry.address
+    }
+  }
+  return undefined
+}
+
+export function endpointURL(expose: boolean): string {
+  const host = expose ? (lanAddress() ?? "127.0.0.1") : "127.0.0.1"
+  return `http://${host}:${ROUTER_PORT}/v1`
+}
+
+async function routerPid(): Promise<number | undefined> {
+  const raw = await fs.readFile(PID_PATH, "utf8").catch(() => "")
+  const pid = Number.parseInt(raw.trim(), 10)
+  if (!Number.isInteger(pid) || pid <= 0) return undefined
+  try {
+    process.kill(pid, 0)
+    return pid
+  } catch {
+    return undefined
+  }
+}
+
+/** Mirrors spawnRouter in the llamastack provider (which generates the preset INI first). */
+async function spawnRouterProcess(expose: boolean): Promise<boolean> {
+  const stat = await fs.stat(LLAMA_SERVER_BIN).catch(() => undefined)
+  if (!stat?.isFile()) return false
+  await fs.mkdir(STATE_DIR, { recursive: true }).catch(() => {})
+  const preset = await fs
+    .stat(PRESET_PATH)
+    .then((item) => item.isFile())
+    .catch(() => false)
+  const log = await fs.open(path.join(STATE_DIR, "router.log"), "a").catch(() => undefined)
+  try {
+    const child = spawn(
+      LLAMA_SERVER_BIN,
+      [
+        "--models-dir",
+        MODELS_DIR,
+        ...(preset ? ["--models-preset", PRESET_PATH] : []),
+        "--models-max",
+        "1",
+        "--host",
+        expose ? "0.0.0.0" : "127.0.0.1",
+        "--port",
+        `${ROUTER_PORT}`,
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", log?.fd ?? "ignore", log?.fd ?? "ignore"],
+      },
+    )
+    child.on("error", () => {})
+    child.unref()
+    if (child.pid) await fs.writeFile(PID_PATH, `${child.pid}\n`).catch(() => {})
+    return true
+  } catch {
+    return false
+  } finally {
+    await log?.close().catch(() => {})
+  }
+}
+
+/**
+ * Restart the detached router so a host-binding change takes effect. Kills the
+ * process recorded in the pidfile, waits for it to exit, and spawns a fresh one.
+ * "not-running": nothing reachable on the port — settings apply when the provider
+ * next spawns the router. "failed": reachable but not restartable (no/stale pidfile).
+ */
+export async function restartRouter(expose: boolean): Promise<"restarted" | "not-running" | "failed"> {
+  const reachable = await fetch(`${ROUTER_BASE}/models`, { signal: AbortSignal.timeout(1_500) })
+    .then((res) => res.ok)
+    .catch(() => false)
+  if (!reachable) return "not-running"
+  const pid = await routerPid()
+  if (!pid) return "failed"
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch {
+    return "failed"
+  }
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      break // exited
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  await fs.rm(PID_PATH, { force: true }).catch(() => {})
+  return (await spawnRouterProcess(expose)) ? "restarted" : "failed"
+}
+
+export type LoadedModel = {
+  name: string
+  status: string
+  /** llama-server flags of the child process, keyed without leading dashes. */
+  args: Record<string, string>
+}
+
+/** The model currently loaded (or loading) per the router's GET /models listing. */
+export async function fetchLoadedModel(): Promise<LoadedModel | undefined> {
+  try {
+    const res = await fetch(`${ROUTER_BASE}/models`, { signal: AbortSignal.timeout(1_500) })
+    if (!res.ok) return undefined
+    const body = (await res.json()) as any
+    const data = Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : []
+    for (const entry of data) {
+      const status = entry?.status
+      if (!status || (status.value !== "loaded" && status.value !== "loading")) continue
+      const name = typeof entry.id === "string" ? entry.id : typeof entry.name === "string" ? entry.name : undefined
+      if (!name) continue
+      const argv: unknown[] = Array.isArray(status.args) ? status.args : []
+      const args: Record<string, string> = {}
+      for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i]
+        if (typeof arg !== "string" || !arg.startsWith("--")) continue
+        const next = argv[i + 1]
+        if (typeof next === "string" && !next.startsWith("--")) {
+          args[arg.slice(2)] = next
+          i++
+        } else {
+          args[arg.slice(2)] = "on"
+        }
+      }
+      return { name, status: status.value, args }
+    }
+  } catch {
+    // router down — caller falls back to models.ini
+  }
+  return undefined
+}
+
+/** Compact one-line summary of the load params the /config screen manages. */
+export function formatLoadParams(get: (key: string) => string | undefined): string {
+  const parts: string[] = []
+  const ctx = get("ctx-size")
+  if (ctx) parts.push(`ctx ${ctx}`)
+  const gpu = get("gpu-layers") ?? get("n-gpu-layers")
+  if (gpu) parts.push(`ngl ${gpu}`)
+  const split = get("tensor-split")
+  if (split) parts.push(`split ${split}`)
+  const k = get("cache-type-k")
+  const v = get("cache-type-v")
+  if (k || v) parts.push(`kv ${k ?? "f16"}/${v ?? "f16"}`)
+  return parts.join(" · ")
 }
