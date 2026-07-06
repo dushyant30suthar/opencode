@@ -26,6 +26,7 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { isRecord } from "@/util/record"
 import { optional } from "@opencode-ai/core/schema"
 import { ProviderTransform } from "./transform"
+import { LlamaStack } from "./llamastack"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
@@ -859,6 +860,13 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           },
         },
       }),
+    llamastack: (input) =>
+      Effect.succeed({
+        // The database entry only exists when a local llama.cpp server was
+        // detected (see LlamaStack.detect), so autoload whenever it has models.
+        autoload: Object.keys(input.models).length > 0,
+        options: input.options,
+      }),
     "snowflake-cortex": Effect.fnUntraced(function* (input: Info) {
       const env = yield* dep.env()
       const auth = yield* dep.auth(input.id)
@@ -1559,6 +1567,16 @@ const layer = Layer.effect(
           const opts = options ?? {}
           const patch: Partial<Info> = providers[providerID] ? { options: opts } : { source: "custom", options: opts }
           mergeProvider(providerID, patch)
+        }
+
+        // built-in local llamastack provider: detect a local llama.cpp server
+        // (manager, router, or spawn the router) with zero configuration
+        {
+          const llamastackID = ProviderV2.ID.llamastack
+          if (isProviderAllowed(llamastackID) && !database[llamastackID]) {
+            const detected = yield* LlamaStack.detect()
+            if (detected) database[llamastackID] = detected
+          }
         }
 
         for (const [id, fn] of Object.entries(custom(dep))) {
