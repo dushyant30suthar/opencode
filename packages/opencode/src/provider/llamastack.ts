@@ -67,7 +67,26 @@ async function listModels(baseURL: string, timeout: number): Promise<DiscoveredM
  * generated preset INI, mirroring llama.cpp's own per-directory heuristics
  * (skip mmproj files, prefer the first shard of multi-shard models).
  */
+const PRESET_HEADER = [
+  "version = 1",
+  "",
+  "# Per-model settings — YOURS TO EDIT. New models get a default section appended;",
+  "# existing sections are never modified or removed by opencode.",
+  "# Any llama-server flag works as a key (without leading dashes). Common ones:",
+  "#   ctx-size = 32768          context window tokens",
+  "#   gpu-layers = 99           layers offloaded to GPU (99 = all)",
+  "#   tensor-split = 0.67,0.33  VRAM ratio across the two GPUs",
+  "#   cache-type-k = q8_0       KV cache quant: f16 | q8_0 | q4_0",
+  "#   cache-type-v = q8_0",
+  "#   flash-attn = on",
+  "#   temp = 0.7                sampling temperature",
+  "# Changes apply on next model load (restart the router or swap models).",
+].join("\n")
+
 async function generatePresets(): Promise<string | undefined> {
+  const preset = path.join(STATE_DIR, "models.ini")
+  const existing = await fs.readFile(preset, "utf8").catch(() => "")
+  const known = new Set([...existing.matchAll(/^\[([^\]]+)\]/gm)].map((m) => m[1]))
   const sections: string[] = []
   const publishers = await fs.readdir(MODELS_DIR, { withFileTypes: true }).catch(() => [])
   for (const publisher of publishers) {
@@ -76,6 +95,7 @@ async function generatePresets(): Promise<string | undefined> {
     const repos = await fs.readdir(publisherDir, { withFileTypes: true }).catch(() => [])
     for (const repo of repos) {
       if (!repo.isDirectory()) continue
+      if (known.has(`${publisher.name}/${repo.name}`)) continue // user-owned section — leave untouched
       const repoDir = path.join(publisherDir, repo.name)
       const files = await fs.readdir(repoDir, { withFileTypes: true }).catch(() => [])
       let model: string | undefined
@@ -97,6 +117,7 @@ async function generatePresets(): Promise<string | undefined> {
           // agent workloads need real context; llama-server's 4096 default is unusable.
           // 32k fits alongside a ~20GB Q4 model on 2x16GB with q8_0 KV cache.
           `ctx-size = 32768`,
+          `gpu-layers = 99`,
           `flash-attn = on`,
           `cache-type-k = q8_0`,
           `cache-type-v = q8_0`,
@@ -105,9 +126,10 @@ async function generatePresets(): Promise<string | undefined> {
       )
     }
   }
-  if (sections.length === 0) return undefined
-  const preset = path.join(STATE_DIR, "models.ini")
-  await fs.writeFile(preset, ["version = 1", "", sections.join("\n\n"), ""].join("\n"))
+  if (!existing && sections.length === 0) return undefined
+  const body = existing.trim().length > 0 ? existing.replace(/\s+$/, "") : PRESET_HEADER
+  const content = sections.length > 0 ? [body, "", sections.join("\n\n"), ""].join("\n") : body + "\n"
+  await fs.writeFile(preset, content)
   return preset
 }
 
