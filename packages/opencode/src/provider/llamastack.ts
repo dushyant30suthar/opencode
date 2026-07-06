@@ -94,6 +94,13 @@ async function generatePresets(): Promise<string | undefined> {
           `[${publisher.name}/${repo.name}]`,
           `model = ${path.join(repoDir, entry)}`,
           ...(mmproj ? [`mmproj = ${path.join(repoDir, mmproj)}`] : []),
+          // agent workloads need real context; llama-server's 4096 default is unusable.
+          // 32k fits alongside a ~20GB Q4 model on 2x16GB with q8_0 KV cache.
+          `ctx-size = 32768`,
+          `flash-attn = on`,
+          `cache-type-k = q8_0`,
+          `cache-type-v = q8_0`,
+          `jinja = true`,
         ].join("\n"),
       )
     }
