@@ -50,6 +50,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
+import { DialogLlamaStackConfig } from "./component/dialog-llamastack-config"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
@@ -742,6 +743,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "connect",
         run: () => {
           dialog.replace(() => <DialogProviderList />)
+        },
+        category: "Provider",
+      },
+      {
+        name: "llamastack.config",
+        title: "Configure local models",
+        slashName: "config",
+        run: () => {
+          dialog.replace(() => <DialogLlamaStackConfig />)
         },
         category: "Provider",
       },
