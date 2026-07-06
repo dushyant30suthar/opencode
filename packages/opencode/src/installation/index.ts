@@ -52,6 +52,16 @@ export function isLocal() {
   return InstallationChannel === "local"
 }
 
+/**
+ * Custom llamastack fork builds must never self-update: the updater would
+ * overwrite the fork binary with stock upstream. Update by rebuilding the fork.
+ */
+export function isLlamaStackBuild() {
+  return InstallationChannel === "llamastack" || InstallationVersion.includes("llamastack")
+}
+
+export const LLAMASTACK_UPGRADE_MESSAGE = "custom llamastack build — update by rebuilding the fork"
+
 export class UpgradeFailedError extends Schema.TaggedErrorClass<UpgradeFailedError>()("UpgradeFailedError", {
   stderr: Schema.String,
 }) {

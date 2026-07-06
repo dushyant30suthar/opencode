@@ -95,6 +95,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
+      if (Installation.isLlamaStackBuild()) {
+        return {
+          status: 400,
+          body: { success: false as const, error: Installation.LLAMASTACK_UPGRADE_MESSAGE },
+        }
+      }
       const method = yield* installation.method()
       if (method === "unknown") {
         return {

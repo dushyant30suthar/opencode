@@ -25,6 +25,11 @@ export const UpgradeCommand = {
     UI.println(UI.logo("  "))
     UI.empty()
     prompts.intro("Upgrade")
+    if (Installation.isLlamaStackBuild()) {
+      prompts.log.warn(Installation.LLAMASTACK_UPGRADE_MESSAGE)
+      prompts.outro("Done")
+      return
+    }
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {

@@ -6,6 +6,8 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { GlobalBus } from "@/bus/global"
 
 export async function upgrade() {
+  // never prompt the fork to "update" to stock upstream
+  if (Installation.isLlamaStackBuild()) return
   const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal()))
   if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) return
   const method = await Installation.method()
