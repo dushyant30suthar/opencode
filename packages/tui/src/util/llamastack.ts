@@ -175,6 +175,65 @@ export async function savePresets(doc: IniDocument): Promise<void> {
   await fs.writeFile(PRESET_PATH, text)
 }
 
+export type ModelStatusEvent = {
+  model: string
+  status?: string
+  /** Load stage reported by llama-server (e.g. "text_model", "mmproj_model"). */
+  stage?: string
+  /** Load progress 0-100 within the current stage. */
+  percent?: number
+}
+
+/**
+ * Stream model status events from the router's GET /models/sse endpoint
+ * (`data: {"model": "...", "event": "model_status", "data": {"status": "loading",
+ * "progress": {"stages": [...], "current": "text_model", "value": 0.5}}}`).
+ * Best effort: silently does nothing when the router is down or predates the
+ * endpoint. Returns an unsubscribe function that closes the connection.
+ */
+export function subscribeModelStatus(onEvent: (event: ModelStatusEvent) => void): () => void {
+  const controller = new AbortController()
+  void (async () => {
+    try {
+      const res = await fetch(`${ROUTER_BASE}/models/sse`, { signal: controller.signal })
+      if (!res.ok || !res.body) return
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let boundary
+        while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data:")) continue
+            try {
+              const payload = JSON.parse(line.slice(5).trim())
+              if (payload?.event !== "model_status" || typeof payload.model !== "string") continue
+              const data = payload.data && typeof payload.data === "object" ? payload.data : {}
+              const progress = data.progress && typeof data.progress === "object" ? data.progress : undefined
+              onEvent({
+                model: payload.model,
+                status: typeof data.status === "string" ? data.status : undefined,
+                stage: typeof progress?.current === "string" ? progress.current : undefined,
+                percent: typeof progress?.value === "number" ? Math.round(progress.value * 100) : undefined,
+              })
+            } catch {
+              // malformed frame — skip
+            }
+          }
+        }
+      }
+    } catch {
+      // router down, aborted, or endpoint missing — degrade to nothing
+    }
+  })()
+  return () => controller.abort()
+}
+
 /**
  * Ask the router to re-read the preset INI. llama-server's reload diffs the new
  * presets against running models and unloads any whose settings changed, so the

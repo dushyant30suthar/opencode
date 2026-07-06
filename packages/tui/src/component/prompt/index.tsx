@@ -20,6 +20,7 @@ import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { useClipboard } from "../../context/clipboard"
 import { Spinner } from "../spinner"
+import { LlamaStackLoadStatus } from "../llamastack-status"
 import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
 import { useProject } from "../../context/project"
@@ -1580,6 +1581,7 @@ export function Prompt(props: PromptProps) {
                       )
                     })()}
                   </box>
+                  <LlamaStackLoadStatus />
                 </box>
                 <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
                   esc{" "}
