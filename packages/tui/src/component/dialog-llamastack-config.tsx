@@ -166,6 +166,7 @@ export function DialogLlamaStackConfig() {
 function DialogLlamaStackSettings(props: { model: string }) {
   const dialog = useDialog()
   const toast = useToast()
+  const local = useLocal()
   const [loaded, { refetch: refetchLoaded }] = createResource(LlamaStack.fetchLoadedModel)
   // seedDraft ran before this dialog opened; a remount re-reads the same draft.
   // CLONE the draft: wrapping the shared object directly would cache a store
@@ -265,6 +266,23 @@ function DialogLlamaStackSettings(props: { model: string }) {
           },
         ]
       : []),
+    // /config's model list looks like a picker, so make switching possible here —
+    // selecting a model in this dialog otherwise only configures it (real switch
+    // lives in "Switch model", ctrl+x m), which has confused actual users
+    ...(local.model.current()?.providerID === "llamastack" && local.model.current()?.modelID === props.model
+      ? []
+      : [
+          {
+            title: "Use this model",
+            value: "__use__",
+            description: "switch the session to this model",
+            onSelect: () => {
+              local.model.set({ providerID: "llamastack", modelID: props.model })
+              toast.show({ message: `Switched to ${props.model}`, variant: "success", duration: 4000 })
+              dialog.clear()
+            },
+          },
+        ]),
     {
       title: "Reset to recommended",
       value: "__reset__",
