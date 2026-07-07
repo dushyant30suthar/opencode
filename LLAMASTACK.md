@@ -149,11 +149,17 @@ Binary-searched the max loadable context per model (ngl 99, flash-attn, q8_0 KV,
 validated by load + 1-token generation), plus a split-mode/ubatch bench sweep on
 the 35B. `/config` → "Reset to recommended" restores these.
 
-| Model | Max ctx | Split | ubatch | Notes |
-|---|---|---|---|---|
-| Qwen3.6-27B Q4_K_M | 258,048 | tensor | 2048 | full training window fits |
-| Qwen3.6-35B-A3B Q4_K_M | 258,048 | tensor | 2048 | 2,522 t/s pp2048 · 152 t/s tg128 |
-| gemma-4-31B QAT Q4_0 | 196,608 | tensor | 512 | 208,896 possible on layer split |
+| Model | Max ctx | Split | ubatch | Generation | Prompt |
+|---|---|---|---|---|---|
+| Qwen3.6-35B-A3B Q4_K_M | 245,760 | tensor | 2048 | 152 t/s | 2,522 t/s |
+| Qwen3.6-27B Q4_K_M | 180,224 | tensor | 2048 | 40 t/s (23 on layer) | 724 t/s |
+| gemma-4-31B QAT Q4_0 | 147,456 | tensor | 512 | 37 t/s | 745 t/s |
+
+Maxima found by binary search through llama-server itself — vision projector (mmproj)
+loaded, exact production flags, success = a real chat completion. Bare-model probes
+overestimate by ~60-80k: the ~900MB mmproj and tensor-mode buffers are real. t/s from
+llama-bench at the same split/ubatch (tg128/pp2048). Tensor split boosts dense-model
+generation dramatically (+72% on the 27B) and the MoE by +14%.
 
 Generation-first by user preference: tensor split = +14% generation for −30%
 prompt speed (still 2,500+ t/s).

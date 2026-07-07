@@ -477,17 +477,16 @@ export async function unloadModel(name: string): Promise<boolean> {
  * then backing off one 4k step for headroom. Fallback: DEFAULT_MODEL_SETTINGS.
  * Values from ~/.local/state/llamastack/ctx-results.txt (2026-07-07).
  */
-// INTERIM values (mmproj-inclusive re-search running): earlier maxima were probed
-// without the ~900MB vision projectors the router loads — 258048 OOMs in production.
 // Generation-first profile (user priority): split-mode tensor = +14% tg (152 t/s
-// on the 35B) at the cost of ~30% pp — pp is still 2500+ t/s, plenty. Each tuple
-// validated by load + generation at these exact values.
+// on the 35B) at the cost of ~30% pp — pp is still 2500+ t/s, plenty. Maxima found
+// 2026-07-07 by binary search through llama-server itself (mmproj included, exact
+// production flags, success = real chat completion).
 export const RECOMMENDED_MODEL_SETTINGS: Record<string, Record<string, string>> = {
-  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "131072", "split-mode": "tensor", "ubatch-size": "2048" },
-  "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "131072", "split-mode": "tensor", "ubatch-size": "2048" },
+  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "180224", "split-mode": "tensor", "ubatch-size": "2048" },
+  "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "245760", "split-mode": "tensor", "ubatch-size": "2048" },
   // gemma's tensor-mode ceiling is lower (196608 vs 208896 on layer split) and it
   // crashes with larger ubatch at max ctx — tensor + default ub512
-  "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "131072", "split-mode": "tensor" },
+  "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "147456", "split-mode": "tensor" },
 }
 
 export function recommendedFor(model: string): Record<string, string> {
