@@ -227,7 +227,10 @@ export function subscribeModelStatus(onEvent: (event: ModelStatusEvent) => void)
             if (!line.startsWith("data:")) continue
             try {
               const payload = JSON.parse(line.slice(5).trim())
-              if (payload?.event !== "model_status" || typeof payload.model !== "string") continue
+              // load progress arrives as "status_change" frames; "model_status" is
+              // only the initial contentless notification
+              if (payload?.event !== "model_status" && payload?.event !== "status_change") continue
+              if (typeof payload.model !== "string") continue
               const data = payload.data && typeof payload.data === "object" ? payload.data : {}
               const progress = data.progress && typeof data.progress === "object" ? data.progress : undefined
               onEvent({
@@ -448,4 +451,19 @@ export function formatLoadParams(get: (key: string) => string | undefined): stri
   const v = get("cache-type-v")
   if (k || v) parts.push(`kv ${k ?? "f16"}/${v ?? "f16"}`)
   return parts.join(" · ")
+}
+
+/** Unload the currently loaded model from the router (frees VRAM). */
+export async function unloadModel(name: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${ROUTER_BASE}/models/unload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: name }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
 }
