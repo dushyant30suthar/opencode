@@ -538,3 +538,29 @@ export async function fetchGpuStats(): Promise<GpuStat[]> {
     })
   })
 }
+
+export type SlotProgress = {
+  processing: boolean
+  total: number
+  processed: number
+}
+
+/** Live prompt-processing progress from the router's /slots endpoint. */
+export async function fetchSlotProgress(model: string): Promise<SlotProgress | undefined> {
+  try {
+    const res = await fetch(`${ROUTER_BASE}/slots?model=${encodeURIComponent(model)}`, {
+      signal: AbortSignal.timeout(1_200),
+    })
+    if (!res.ok) return undefined
+    const body = (await res.json()) as any
+    const slot = Array.isArray(body) ? body[0] : undefined
+    if (!slot || typeof slot !== "object") return undefined
+    return {
+      processing: slot.is_processing === true,
+      total: typeof slot.n_prompt_tokens === "number" ? slot.n_prompt_tokens : 0,
+      processed: typeof slot.n_prompt_tokens_processed === "number" ? slot.n_prompt_tokens_processed : 0,
+    }
+  } catch {
+    return undefined
+  }
+}

@@ -16,6 +16,7 @@ export function LlamaStackLoadStatus() {
   const { theme } = useTheme()
   const [loading, setLoading] = createSignal<LlamaStack.ModelStatusEvent>()
   const [failed, setFailed] = createSignal<LlamaStack.ModelStatusEvent>()
+  const [slot, setSlot] = createSignal<LlamaStack.SlotProgress>()
 
   const enabled = createMemo(() => local.model.current()?.providerID === "llamastack")
 
@@ -45,6 +46,24 @@ export function LlamaStackLoadStatus() {
     })
   })
 
+  // prompt-processing progress: poll the router's /slots while the request is in
+  // flight (this component only mounts then) so long prefills tick instead of
+  // showing an indefinite spinner
+  createEffect(() => {
+    if (!enabled()) return
+    const model = local.model.current()?.modelID
+    if (!model) return
+    const interval = setInterval(() => {
+      void LlamaStack.fetchSlotProgress(model).then((progress) => {
+        setSlot(progress?.processing ? progress : undefined)
+      })
+    }, 1_500)
+    onCleanup(() => {
+      clearInterval(interval)
+      setSlot(undefined)
+    })
+  })
+
   const label = createMemo(() => {
     const event = loading()
     if (!event) return ""
@@ -62,8 +81,24 @@ export function LlamaStackLoadStatus() {
     return `${name} failed to load${code} — likely out of VRAM; lower ctx-size in /config`
   })
 
+  const slotLabel = createMemo(() => {
+    const progress = slot()
+    if (!progress) return ""
+    const done = progress.processed.toLocaleString()
+    if (progress.total > progress.processed) {
+      const pct = Math.round((progress.processed / progress.total) * 100)
+      return `reading prompt ${done}/${progress.total.toLocaleString()} tok · ${pct}%`
+    }
+    return `reading prompt ${done} tok`
+  })
+
   return (
     <>
+      <Show when={!loading() && slot()}>
+        <text fg={theme.accent} wrapMode="none">
+          {slotLabel()}
+        </text>
+      </Show>
       <Show when={loading()}>
         <text fg={theme.accent} wrapMode="none">
           {label()}
