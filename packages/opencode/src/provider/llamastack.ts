@@ -232,11 +232,34 @@ function toModel(providerID: ProviderV2.ID, baseURL: string, discovered: Discove
   }
 }
 
-function toInfo(baseURL: string, discovered: DiscoveredModel[]): Info {
+/**
+ * The router's model listing has no context metadata for unloaded models, so
+ * without this the models would advertise the 32k fallback and opencode would
+ * compact conversations far below the real window. models.ini is the source of
+ * truth for what ctx-size a model actually loads with.
+ */
+async function presetContexts(): Promise<Record<string, number>> {
+  const result: Record<string, number> = {}
+  const text = await fs.readFile(path.join(STATE_DIR, "models.ini"), "utf8").catch(() => "")
+  let section = ""
+  for (const line of text.split("\n")) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*$/)
+    if (header) {
+      section = header[1]
+      continue
+    }
+    const ctx = line.match(/^\s*ctx-size\s*=\s*(\d+)\s*$/)
+    if (ctx && section) result[section] = Number.parseInt(ctx[1], 10)
+  }
+  return result
+}
+
+async function toInfo(baseURL: string, discovered: DiscoveredModel[]): Promise<Info> {
   const providerID = ProviderV2.ID.llamastack
+  const contexts = await presetContexts()
   const models: Record<string, Model> = {}
   for (const entry of discovered) {
-    models[entry.id] = toModel(providerID, baseURL, entry)
+    models[entry.id] = toModel(providerID, baseURL, { ...entry, context: contexts[entry.id] ?? entry.context })
   }
   return {
     id: providerID,
@@ -255,7 +278,7 @@ async function run(): Promise<Info | undefined> {
   for (const baseURL of [MANAGER_URL, ROUTER_URL]) {
     const models = await listModels(baseURL, PROBE_TIMEOUT)
     if (models === undefined) continue
-    if (models.length > 0) return toInfo(baseURL, models)
+    if (models.length > 0) return await toInfo(baseURL, models)
     if (baseURL === ROUTER_URL) routerReachable = true
   }
   // router already up but empty; nothing to gain from spawning another one
@@ -263,7 +286,7 @@ async function run(): Promise<Info | undefined> {
   if (!(await spawnRouter())) return undefined
   const models = await awaitRouter()
   if (!models) return undefined
-  return toInfo(ROUTER_URL, models)
+  return await toInfo(ROUTER_URL, models)
 }
 
 let detection: Promise<Info | undefined> | undefined
