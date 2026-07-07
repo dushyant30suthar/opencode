@@ -149,11 +149,14 @@ Binary-searched the max loadable context per model (ngl 99, flash-attn, q8_0 KV,
 validated by load + 1-token generation), plus a split-mode/ubatch bench sweep on
 the 35B. `/config` → "Reset to recommended" restores these.
 
-| Model | Max ctx | ubatch | Notes |
-|---|---|---|---|
-| Qwen3.6-27B Q4_K_M | 258,048 | 1024 | full training window fits |
-| Qwen3.6-35B-A3B Q4_K_M | 258,048 | 1024 | 3,613 t/s pp2048 · 133 t/s tg128 |
-| gemma-4-31B QAT Q4_0 | 208,896 | 512 (default) | segfaults at max ctx with ub1024 |
+| Model | Max ctx | Split | ubatch | Notes |
+|---|---|---|---|---|
+| Qwen3.6-27B Q4_K_M | 258,048 | tensor | 2048 | full training window fits |
+| Qwen3.6-35B-A3B Q4_K_M | 258,048 | tensor | 2048 | 2,522 t/s pp2048 · 152 t/s tg128 |
+| gemma-4-31B QAT Q4_0 | 196,608 | tensor | 512 | 208,896 possible on layer split |
+
+Generation-first by user preference: tensor split = +14% generation for −30%
+prompt speed (still 2,500+ t/s).
 
 Sweep findings (35B): ub1024 = best prompt speed (+6% over ub512); ub2048 regresses.
 `-sm tensor` = 152 t/s generation (+14%) but −30% prompt speed — documented in the
