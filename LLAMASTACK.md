@@ -152,6 +152,7 @@ the 35B. `/config` → "Reset to recommended" restores these.
 | Model | Max ctx | Split | ubatch | Generation | Prompt |
 |---|---|---|---|---|---|
 | Qwen3.6-35B-A3B Q4_K_M | 245,760 | tensor | 2048 | 152 t/s | 2,522 t/s |
+| **Qwen3.6-27B-MTP UD-Q4_K_XL** | 180,224 | tensor | 2048 | **70.6 t/s** (draft-mtp n=4, q8 KV) | — |
 | Qwen3.6-27B Q4_K_M | 180,224 | tensor | 2048 | 40 t/s (23 on layer) | 724 t/s |
 | gemma-4-31B QAT Q4_0 | 147,456 | tensor | 512 | 37 t/s | 745 t/s |
 
