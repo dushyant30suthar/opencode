@@ -139,6 +139,7 @@ async function generatePresets(): Promise<string | undefined> {
             `cache-type-k = q8_0`,
             `cache-type-v = q8_0`,
             `jinja = true`,
+            `cache-ram = 2048`,
           ].join("\n"),
         )
       }

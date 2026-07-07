@@ -185,6 +185,7 @@ export function defaultSection(discovered: LocalModelFile): IniSection {
       `cache-type-k = q8_0`,
       `cache-type-v = q8_0`,
       `jinja = true`,
+      `cache-ram = 2048`,
     ],
   }
 }
