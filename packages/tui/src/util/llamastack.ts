@@ -482,7 +482,8 @@ export async function unloadModel(name: string): Promise<boolean> {
 // 2026-07-07 by binary search through llama-server itself (mmproj included, exact
 // production flags, success = real chat completion).
 export const RECOMMENDED_MODEL_SETTINGS: Record<string, Record<string, string>> = {
-  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "180224", "split-mode": "tensor", "ubatch-size": "2048" },
+  // 27B runs vision-less by user choice (mmproj line removed from models.ini) — full 256k fits
+  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "258048", "split-mode": "tensor", "ubatch-size": "2048" },
   "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "245760", "split-mode": "tensor", "ubatch-size": "2048" },
   // gemma's tensor-mode ceiling is lower (196608 vs 208896 on layer split) and it
   // crashes with larger ubatch at max ctx — tensor + default ub512
