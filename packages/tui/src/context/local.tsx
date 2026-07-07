@@ -13,6 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { warmModel } from "../util/llamastack"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -335,6 +336,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               save()
             }
           })
+          // warm VRAM on selection so it's ready before the first message
+          if (model.providerID === "llamastack") void warmModel(model.modelID)
         },
         toggleFavorite(model: { providerID: string; modelID: string }) {
           batch(() => {

@@ -564,3 +564,22 @@ export async function fetchSlotProgress(model: string): Promise<SlotProgress | u
     return undefined
   }
 }
+
+/**
+ * Ask the router to start loading a model now (fire-and-forget), so selecting a
+ * model in the picker warms VRAM instead of waiting for the first message. The
+ * router swaps out whatever else is loaded (models-max 1). Safe to spam — it's
+ * a no-op if already loaded/loading.
+ */
+export async function warmModel(model: string): Promise<void> {
+  try {
+    await fetch(`${ROUTER_BASE}/models/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(2_000),
+    })
+  } catch {
+    // router down or slow — the first message will trigger the load anyway
+  }
+}
