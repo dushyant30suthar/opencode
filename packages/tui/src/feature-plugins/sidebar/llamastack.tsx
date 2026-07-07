@@ -1,6 +1,6 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createEffect, createMemo, createResource, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
 import { useLocal } from "../../context/local"
 import * as LlamaStack from "../../util/llamastack"
 
@@ -41,11 +41,23 @@ function View(props: { api: TuiPluginApi }) {
     },
   )
 
+  const [gpus, { refetch: refetchGpus }] = createResource(() => (active() ? true : undefined), LlamaStack.fetchGpuStats)
+
   createEffect(() => {
     if (!active()) return
-    const interval = setInterval(() => void refetch(), 10_000)
+    const interval = setInterval(() => {
+      void refetch()
+      void refetchGpus()
+    }, 10_000)
     onCleanup(() => clearInterval(interval))
   })
+
+  const gpuLines = createMemo(() =>
+    (gpus() ?? []).map(
+      (gpu) =>
+        `GPU${gpu.index} ${(gpu.usedMiB / 1024).toFixed(1)}/${(gpu.totalMiB / 1024).toFixed(0)}G · ${gpu.utilization}%`,
+    ),
+  )
 
   const endpoint = createMemo(() => LlamaStack.endpointURL(LlamaStack.serverSettings()?.expose ?? true))
 
@@ -72,6 +84,13 @@ function View(props: { api: TuiPluginApi }) {
             </>
           )}
         </Show>
+        <For each={gpuLines()}>
+          {(line) => (
+            <text fg={theme().textMuted} wrapMode="none">
+              {line}
+            </text>
+          )}
+        </For>
       </box>
     </Show>
   )

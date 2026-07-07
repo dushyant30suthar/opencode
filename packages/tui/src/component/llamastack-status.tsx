@@ -15,18 +15,33 @@ export function LlamaStackLoadStatus() {
   const local = useLocal()
   const { theme } = useTheme()
   const [loading, setLoading] = createSignal<LlamaStack.ModelStatusEvent>()
+  const [failed, setFailed] = createSignal<LlamaStack.ModelStatusEvent>()
 
   const enabled = createMemo(() => local.model.current()?.providerID === "llamastack")
 
   createEffect(() => {
     if (!enabled()) return
     const unsubscribe = LlamaStack.subscribeModelStatus((event) => {
-      if (event.status === "loading") setLoading(event)
-      else setLoading((prev) => (prev?.model === event.model ? undefined : prev))
+      if (event.status === "loading") {
+        setLoading(event)
+        setFailed(undefined)
+        return
+      }
+      // a watched load that ends in error/nonzero exit died mid-load — say so
+      // in place instead of silently vanishing
+      setLoading((prev) => {
+        if (prev?.model !== event.model) return prev
+        if (event.status === "error" || (event.exitCode !== undefined && event.exitCode !== 0)) {
+          setFailed(event)
+          setTimeout(() => setFailed((current) => (current === event ? undefined : current)), 30_000)
+        }
+        return undefined
+      })
     })
     onCleanup(() => {
       unsubscribe()
       setLoading(undefined)
+      setFailed(undefined)
     })
   })
 
@@ -39,11 +54,26 @@ export function LlamaStackLoadStatus() {
     return `loading ${name}${stage}${percent}`
   })
 
+  const failedLabel = createMemo(() => {
+    const event = failed()
+    if (!event) return ""
+    const name = event.model.split("/").filter(Boolean).at(-1) ?? event.model
+    const code = event.exitCode !== undefined ? ` (exit ${event.exitCode})` : ""
+    return `${name} failed to load${code} — likely out of VRAM; lower ctx-size in /config`
+  })
+
   return (
-    <Show when={loading()}>
-      <text fg={theme.accent} wrapMode="none">
-        {label()}
-      </text>
-    </Show>
+    <>
+      <Show when={loading()}>
+        <text fg={theme.accent} wrapMode="none">
+          {label()}
+        </text>
+      </Show>
+      <Show when={failed()}>
+        <text fg={theme.error} wrapMode="none">
+          {failedLabel()}
+        </text>
+      </Show>
+    </>
   )
 }

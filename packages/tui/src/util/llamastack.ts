@@ -197,6 +197,8 @@ export type ModelStatusEvent = {
   stage?: string
   /** Load progress 0-100 within the current stage. */
   percent?: number
+  /** Process exit code when the router reports the instance died. */
+  exitCode?: number
 }
 
 /**
@@ -238,6 +240,7 @@ export function subscribeModelStatus(onEvent: (event: ModelStatusEvent) => void)
                 status: typeof data.status === "string" ? data.status : undefined,
                 stage: typeof progress?.current === "string" ? progress.current : undefined,
                 percent: typeof progress?.value === "number" ? Math.round(progress.value * 100) : undefined,
+                exitCode: typeof data.exit_code === "number" ? data.exit_code : undefined,
               })
             } catch {
               // malformed frame — skip
@@ -474,17 +477,51 @@ export async function unloadModel(name: string): Promise<boolean> {
  * then backing off one 4k step for headroom. Fallback: DEFAULT_MODEL_SETTINGS.
  * Values from ~/.local/state/llamastack/ctx-results.txt (2026-07-07).
  */
+// INTERIM values (mmproj-inclusive re-search running): earlier maxima were probed
+// without the ~900MB vision projectors the router loads — 258048 OOMs in production.
 // Generation-first profile (user priority): split-mode tensor = +14% tg (152 t/s
 // on the 35B) at the cost of ~30% pp — pp is still 2500+ t/s, plenty. Each tuple
 // validated by load + generation at these exact values.
 export const RECOMMENDED_MODEL_SETTINGS: Record<string, Record<string, string>> = {
-  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "258048", "split-mode": "tensor", "ubatch-size": "2048" },
-  "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "258048", "split-mode": "tensor", "ubatch-size": "2048" },
+  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "131072", "split-mode": "tensor", "ubatch-size": "2048" },
+  "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "131072", "split-mode": "tensor", "ubatch-size": "2048" },
   // gemma's tensor-mode ceiling is lower (196608 vs 208896 on layer split) and it
   // crashes with larger ubatch at max ctx — tensor + default ub512
-  "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "196608", "split-mode": "tensor" },
+  "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "131072", "split-mode": "tensor" },
 }
 
 export function recommendedFor(model: string): Record<string, string> {
   return { ...DEFAULT_MODEL_SETTINGS, ...(RECOMMENDED_MODEL_SETTINGS[model] ?? {}) }
+}
+
+export type GpuStat = {
+  index: number
+  usedMiB: number
+  totalMiB: number
+  utilization: number
+}
+
+/** Per-GPU VRAM + utilization via nvidia-smi. Empty array when unavailable. */
+export async function fetchGpuStats(): Promise<GpuStat[]> {
+  return new Promise((resolve) => {
+    const child = spawn("nvidia-smi", ["--query-gpu=index,memory.used,memory.total,utilization.gpu", "--format=csv,noheader,nounits"], { stdio: ["ignore", "pipe", "ignore"] })
+    let out = ""
+    const timer = setTimeout(() => child.kill(), 3_000)
+    child.stdout.on("data", (chunk) => (out += chunk))
+    child.on("error", () => {
+      clearTimeout(timer)
+      resolve([])
+    })
+    child.on("close", () => {
+      clearTimeout(timer)
+      const stats: GpuStat[] = []
+      for (const line of out.trim().split("\n")) {
+        const [index, used, total, util] = line.split(",").map((v) => Number.parseInt(v.trim(), 10))
+        if (!Number.isNaN(index) && !Number.isNaN(used)) {
+          stats.push({ index, usedMiB: used, totalMiB: total, utilization: Number.isNaN(util) ? 0 : util })
+        }
+      }
+      resolve(stats)
+    })
+  })
 }
