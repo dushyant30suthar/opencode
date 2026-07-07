@@ -261,6 +261,15 @@ function DialogLlamaStackSettings(props: { model: string }) {
         ]
       : []),
     {
+      title: "Reset to recommended",
+      value: "__reset__",
+      description: "max-context values tuned for this machine",
+      onSelect: () => {
+        const recommended = LlamaStack.recommendedFor(props.model)
+        for (const field of FIELDS) set(field.key, recommended[field.key] ?? field.fallback)
+      },
+    },
+    {
       title: "Save",
       value: "__save__",
       description: "write models.ini and reload the router",

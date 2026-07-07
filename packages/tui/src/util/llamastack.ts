@@ -467,3 +467,21 @@ export async function unloadModel(name: string): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Per-model recommended settings, tuned on this machine (2x 5060 Ti 16GB) by
+ * binary-searching the largest ctx-size that loads with ngl 99 + fa + q8_0 KV,
+ * then backing off one 4k step for headroom. Fallback: DEFAULT_MODEL_SETTINGS.
+ * Values from ~/.local/state/llamastack/ctx-results.txt (2026-07-07).
+ */
+export const RECOMMENDED_MODEL_SETTINGS: Record<string, Record<string, string>> = {
+  // ubatch-size 1024 = best prompt speed (3613 t/s pp2048 on the 35B); validated at max ctx
+  "lmstudio-community/Qwen3.6-27B-GGUF": { "ctx-size": "258048", "ubatch-size": "1024" },
+  "lmstudio-community/Qwen3.6-35B-A3B-GGUF": { "ctx-size": "258048", "ubatch-size": "1024" },
+  // gemma segfaults at max ctx with ub1024 — stays on the default ub512
+  "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "208896" },
+}
+
+export function recommendedFor(model: string): Record<string, string> {
+  return { ...DEFAULT_MODEL_SETTINGS, ...(RECOMMENDED_MODEL_SETTINGS[model] ?? {}) }
+}
