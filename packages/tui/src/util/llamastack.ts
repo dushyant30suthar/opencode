@@ -114,10 +114,19 @@ export type LocalModelFile = {
   mmproj?: string
 }
 
+/** "Qwen3.6-27B-Q6_K.gguf" in repo "Qwen3.6-27B-GGUF" → "publisher/Qwen3.6-27B:Q6_K". */
+export function quantSectionName(publisher: string, repo: string, filename: string): string {
+  const repoShort = repo.replace(/-GGUF$/i, "")
+  const stem = filename.replace(/\.gguf$/i, "").replace(/-\d{5}-of-\d{5}$/, "")
+  const quant = stem.match(/-((?:I?Q\d[\w.]*)|F16|F32|BF16|MXFP4[\w]*)$/i)?.[1]
+  return `${publisher}/${repoShort}:${quant ?? stem}`
+}
+
 /**
  * Scan the LM Studio layout (<models>/<publisher>/<repo>/*.gguf) the same way
- * generatePresets() in the llamastack provider does: skip mmproj files, prefer
- * the first shard of multi-shard models.
+ * generatePresets() in the llamastack provider does: one entry per quant file
+ * (every variant is its own model), skip mmproj files, only the first shard of
+ * multi-shard models. Single-file repos keep the plain publisher/repo name.
  */
 export async function discoverLocalModels(): Promise<LocalModelFile[]> {
   const result: LocalModelFile[] = []
@@ -130,22 +139,25 @@ export async function discoverLocalModels(): Promise<LocalModelFile[]> {
       if (!repo.isDirectory()) continue
       const repoDir = path.join(publisherDir, repo.name)
       const files = await fs.readdir(repoDir, { withFileTypes: true }).catch(() => [])
-      let model: string | undefined
-      let shard: string | undefined
       let mmproj: string | undefined
+      const entries: string[] = []
       for (const file of files) {
         if (!file.isFile() || !file.name.endsWith(".gguf")) continue
         if (file.name.includes("mmproj")) mmproj = file.name
-        else if (file.name.includes("-00001-of-")) shard = file.name
-        else model = file.name
+        else if (/-\d{5}-of-\d{5}\.gguf$/.test(file.name)) {
+          if (file.name.includes("-00001-of-")) entries.push(file.name)
+        } else entries.push(file.name)
       }
-      const entry = shard ?? model
-      if (!entry) continue
-      result.push({
-        name: `${publisher.name}/${repo.name}`,
-        model: path.join(repoDir, entry),
-        ...(mmproj ? { mmproj: path.join(repoDir, mmproj) } : {}),
-      })
+      for (const entry of entries) {
+        result.push({
+          name:
+            entries.length === 1
+              ? `${publisher.name}/${repo.name}`
+              : quantSectionName(publisher.name, repo.name, entry),
+          model: path.join(repoDir, entry),
+          ...(mmproj ? { mmproj: path.join(repoDir, mmproj) } : {}),
+        })
+      }
     }
   }
   return result

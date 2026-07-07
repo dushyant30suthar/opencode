@@ -85,7 +85,12 @@ export function DialogLlamaStackConfig() {
   const models = createMemo(() => {
     const value = data()
     if (!value) return []
-    const names = value.discovered.map((entry) => entry.name)
+    // files already claimed by a (possibly renamed/tuned) section belong to that
+    // section — don't list them again under their generated quant name
+    const claimed = new Set(
+      value.doc.sections.map((section) => LlamaStack.getValue(section, "model")).filter(Boolean),
+    )
+    const names = value.discovered.filter((entry) => !claimed.has(entry.model)).map((entry) => entry.name)
     for (const section of value.doc.sections) {
       if (section.name === "*") continue // llama.cpp global preset section
       if (!names.includes(section.name)) names.push(section.name)

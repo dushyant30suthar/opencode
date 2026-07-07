@@ -83,10 +83,20 @@ const PRESET_HEADER = [
   "# Changes apply on next model load (restart the router or swap models).",
 ].join("\n")
 
+/** "Qwen3.6-27B-Q6_K.gguf" in repo "Qwen3.6-27B-GGUF" → "publisher/Qwen3.6-27B:Q6_K". */
+export function quantSectionName(publisher: string, repo: string, filename: string): string {
+  const repoShort = repo.replace(/-GGUF$/i, "")
+  const stem = filename.replace(/\.gguf$/i, "").replace(/-\d{5}-of-\d{5}$/, "")
+  const quant = stem.match(/-((?:I?Q\d[\w.]*)|F16|F32|BF16|MXFP4[\w]*)$/i)?.[1]
+  return `${publisher}/${repoShort}:${quant ?? stem}`
+}
+
 async function generatePresets(): Promise<string | undefined> {
   const preset = path.join(STATE_DIR, "models.ini")
   const existing = await fs.readFile(preset, "utf8").catch(() => "")
   const known = new Set([...existing.matchAll(/^\[([^\]]+)\]/gm)].map((m) => m[1]))
+  // files already referenced by any section's model= line are user-owned — never re-seed
+  const referenced = new Set([...existing.matchAll(/^\s*model\s*=\s*(.+?)\s*$/gm)].map((m) => m[1]))
   const sections: string[] = []
   const publishers = await fs.readdir(MODELS_DIR, { withFileTypes: true }).catch(() => [])
   for (const publisher of publishers) {
@@ -95,35 +105,43 @@ async function generatePresets(): Promise<string | undefined> {
     const repos = await fs.readdir(publisherDir, { withFileTypes: true }).catch(() => [])
     for (const repo of repos) {
       if (!repo.isDirectory()) continue
-      if (known.has(`${publisher.name}/${repo.name}`)) continue // user-owned section — leave untouched
       const repoDir = path.join(publisherDir, repo.name)
       const files = await fs.readdir(repoDir, { withFileTypes: true }).catch(() => [])
-      let model: string | undefined
-      let shard: string | undefined
       let mmproj: string | undefined
+      const entries: string[] = []
       for (const file of files) {
         if (!file.isFile() || !file.name.endsWith(".gguf")) continue
         if (file.name.includes("mmproj")) mmproj = file.name
-        else if (file.name.includes("-00001-of-")) shard = file.name
-        else model = file.name
+        else if (/-\d{5}-of-\d{5}\.gguf$/.test(file.name)) {
+          if (file.name.includes("-00001-of-")) entries.push(file.name)
+        } else entries.push(file.name)
       }
-      const entry = shard ?? model
-      if (!entry) continue
-      sections.push(
-        [
-          `[${publisher.name}/${repo.name}]`,
-          `model = ${path.join(repoDir, entry)}`,
-          ...(mmproj ? [`mmproj = ${path.join(repoDir, mmproj)}`] : []),
-          // agent workloads need real context; llama-server's 4096 default is unusable.
-          // 32k fits alongside a ~20GB Q4 model on 2x16GB with q8_0 KV cache.
-          `ctx-size = 32768`,
-          `gpu-layers = 99`,
-          `flash-attn = on`,
-          `cache-type-k = q8_0`,
-          `cache-type-v = q8_0`,
-          `jinja = true`,
-        ].join("\n"),
-      )
+      // one section per quant file, so every variant shows up as its own model
+      for (const entry of entries) {
+        const full = path.join(repoDir, entry)
+        if (referenced.has(full)) continue
+        const name =
+          entries.length === 1 && !known.has(`${publisher.name}/${repo.name}`)
+            ? `${publisher.name}/${repo.name}`
+            : quantSectionName(publisher.name, repo.name, entry)
+        if (known.has(name)) continue
+        known.add(name)
+        sections.push(
+          [
+            `[${name}]`,
+            `model = ${full}`,
+            ...(mmproj ? [`mmproj = ${path.join(repoDir, mmproj)}`] : []),
+            // agent workloads need real context; llama-server's 4096 default is unusable.
+            // 32k fits alongside a ~20GB Q4 model on 2x16GB with q8_0 KV cache.
+            `ctx-size = 32768`,
+            `gpu-layers = 99`,
+            `flash-attn = on`,
+            `cache-type-k = q8_0`,
+            `cache-type-v = q8_0`,
+            `jinja = true`,
+          ].join("\n"),
+        )
+      }
     }
   }
   if (!existing && sections.length === 0) return undefined
