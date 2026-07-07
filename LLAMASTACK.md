@@ -143,6 +143,24 @@ Benchmarks on this build (dual-GPU, `-ngl 99 -fa 1`):
 | Qwen3.6-35B-A3B Q4_K_M      | 2500 t/s   | 131 t/s   |
 | Qwen3.6-27B Q4_K_M          | 906 t/s    | 23.4 t/s  |
 
+## Tuned per-model limits (2026-07-07 experiments)
+
+Binary-searched the max loadable context per model (ngl 99, flash-attn, q8_0 KV,
+validated by load + 1-token generation), plus a split-mode/ubatch bench sweep on
+the 35B. `/config` → "Reset to recommended" restores these.
+
+| Model | Max ctx | ubatch | Notes |
+|---|---|---|---|
+| Qwen3.6-27B Q4_K_M | 258,048 | 1024 | full training window fits |
+| Qwen3.6-35B-A3B Q4_K_M | 258,048 | 1024 | 3,613 t/s pp2048 · 133 t/s tg128 |
+| gemma-4-31B QAT Q4_0 | 208,896 | 512 (default) | segfaults at max ctx with ub1024 |
+
+Sweep findings (35B): ub1024 = best prompt speed (+6% over ub512); ub2048 regresses.
+`-sm tensor` = 152 t/s generation (+14%) but −30% prompt speed — documented in the
+models.ini header as the chat profile. `-sm row` unsupported (no GPU P2P over the
+PCH x4 link). Alternative profiles (chat / speed with ngram-mod speculation) are
+documented in the models.ini header comments.
+
 ## Maintaining the fork
 
 Branch `llamastack` on top of upstream `master`. To update:
