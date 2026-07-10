@@ -23,6 +23,7 @@ function resolveServerBin(): string {
   const home = os.homedir()
   const candidates = [
     ...(process.env["PATH"] || "").split(path.delimiter).filter(Boolean),
+    path.join(home, "Projects", "opencode-llama.cpp", "llama.cpp", "build", "bin"),
     path.join(home, "Projects", "llama", "llama.cpp", "build", "bin"),
     path.join(home, "Projects", "llama.cpp", "build", "bin"),
     path.join(home, "llama.cpp", "build", "bin"),
