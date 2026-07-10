@@ -144,8 +144,8 @@ containing `llamastack`) are exempt: no update prompt at launch, and both
 | Router log              | `~/.local/state/llamastack/router.log`                        |
 | Router pidfile          | `~/.local/state/llamastack/router.pid`                        |
 | Router port             | `9337` (`/v1` OpenAI-compatible; `/models`, `/models/sse` router API) |
-| Models directory        | `~/.lmstudio/models` (LM Studio layout)                       |
-| llama-server binary     | `~/Projects/llama/llama.cpp/build/bin/llama-server`           |
+| Models directory        | `$LLAMASTACK_MODELS_DIR`, else `~/.lmstudio/models` (LM Studio layout) |
+| llama-server binary     | `$LLAMASTACK_SERVER_BIN`, else first hit on `$PATH`, else conventional build dirs (`~/Projects/llama/llama.cpp/build/bin`, `~/Projects/llama.cpp/build/bin`, `~/llama.cpp/build/bin`, `/usr/local/bin`) |
 | Escape hatch            | `OPENCODE_DISABLE_LLAMASTACK=1` skips detection entirely      |
 
 ## The engine (llama.cpp)

@@ -1,4 +1,5 @@
 import fs from "fs/promises"
+import { existsSync } from "fs"
 import os from "os"
 import path from "path"
 import { spawn } from "child_process"
@@ -11,8 +12,24 @@ import { createSignal } from "solid-js"
  * keep the two in sync.
  */
 
-export const MODELS_DIR = "/home/dushyant30suthar/.lmstudio/models"
-export const LLAMA_SERVER_BIN = "/home/dushyant30suthar/Projects/llama/llama.cpp/build/bin/llama-server"
+/** Model files in the LM Studio layout; override with $LLAMASTACK_MODELS_DIR. */
+export const MODELS_DIR = process.env["LLAMASTACK_MODELS_DIR"] || path.join(os.homedir(), ".lmstudio", "models")
+/** llama-server binary: $LLAMASTACK_SERVER_BIN, then $PATH, then conventional build locations. */
+export const LLAMA_SERVER_BIN = resolveServerBin()
+
+function resolveServerBin(): string {
+  const override = process.env["LLAMASTACK_SERVER_BIN"]
+  if (override) return override
+  const home = os.homedir()
+  const candidates = [
+    ...(process.env["PATH"] || "").split(path.delimiter).filter(Boolean),
+    path.join(home, "Projects", "llama", "llama.cpp", "build", "bin"),
+    path.join(home, "Projects", "llama.cpp", "build", "bin"),
+    path.join(home, "llama.cpp", "build", "bin"),
+    "/usr/local/bin",
+  ].map((dir) => path.join(dir, "llama-server"))
+  return candidates.find((bin) => existsSync(bin)) ?? candidates[candidates.length - 1]
+}
 export const ROUTER_PORT = 9337
 export const ROUTER_BASE = `http://127.0.0.1:${ROUTER_PORT}`
 
