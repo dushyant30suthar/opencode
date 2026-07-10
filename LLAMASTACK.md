@@ -3,7 +3,7 @@
 This is opencode with a built-in, zero-config local-model stack for this machine
 (2× RTX 5060 Ti 16GB). One binary: launch `opencode`, local models are in the
 model picker, no config files, env vars, auth entries, or scripts. Everything
-below lives on the `llamastack` branch on top of upstream `master`.
+below lives on the `opencode-llama.cpp` branch on top of upstream `master`.
 
 ## Features
 
@@ -200,7 +200,7 @@ documented in the models.ini header comments.
 
 ## Maintaining the fork
 
-Branch `llamastack` on top of upstream `master`. To update:
+Branch `opencode-llama.cpp` on top of upstream `master`. To update:
 
 ```sh
 git fetch upstream
