@@ -1,5 +1,5 @@
 import fs from "fs/promises"
-import { existsSync } from "fs"
+import { existsSync, readFileSync } from "fs"
 import os from "os"
 import path from "path"
 import { spawn } from "child_process"
@@ -521,8 +521,31 @@ export const RECOMMENDED_MODEL_SETTINGS: Record<string, Record<string, string>> 
   "lmstudio-community/gemma-4-31B-it-QAT-GGUF": { "ctx-size": "147456", "split-mode": "tensor" },
 }
 
+/**
+ * Machine-benchmarked overrides written by the stack repo's
+ * scripts/tune-model.sh (greedy sweep of KV quant, ubatch, split-mode, MTP
+ * draft length). Highest precedence: what the tuner measured on THIS machine
+ * beats the hardcoded map.
+ */
+export const RECOMMENDED_PATH = path.join(STATE_DIR, "recommended.ini")
+
+function benchmarkedFor(model: string): Record<string, string> {
+  try {
+    const section = parseIni(readFileSync(RECOMMENDED_PATH, "utf8")).sections.find((s) => s.name === model)
+    if (!section) return {}
+    const out: Record<string, string> = {}
+    for (const line of section.lines) {
+      const kv = line.match(/^\s*([^#;=\s][^=]*?)\s*=\s*(.*?)\s*$/)
+      if (kv) out[kv[1]] = kv[2]
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 export function recommendedFor(model: string): Record<string, string> {
-  return { ...DEFAULT_MODEL_SETTINGS, ...(RECOMMENDED_MODEL_SETTINGS[model] ?? {}) }
+  return { ...DEFAULT_MODEL_SETTINGS, ...(RECOMMENDED_MODEL_SETTINGS[model] ?? {}), ...benchmarkedFor(model) }
 }
 
 export type GpuStat = {
