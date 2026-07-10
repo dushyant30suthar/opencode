@@ -34,8 +34,35 @@ the nested repos, mirroring llama.cpp's heuristics: `mmproj` files are attached
 as multimodal projectors, the first shard of multi-shard models is used.
 
 New models get a default section appended (`ctx-size = 32768`, `gpu-layers = 99`,
-`flash-attn = on`, `cache-type-k/v = q8_0`, `jinja = true`); existing sections
-are never modified or removed — the file is yours to edit.
+`flash-attn = on`, `cache-type-k/v = q8_0`, `jinja = true`, `cache-ram = 2048`,
+`reasoning-preserve = true`); existing sections are never modified or removed —
+the file is yours to edit.
+
+### Preserve thinking (the tool-call-loop fix)
+
+Thinking models (Qwen3.6) strip previous-turn `<think>` blocks from the prompt
+by default; mid-task the model forgets *why* it called the last three tools and
+starts looping — repeating tool calls, sometimes with empty `{}` arguments.
+Two halves make the round-trip work, and both are in place:
+
+1. opencode already sends `reasoning_content` back on assistant messages
+   (`@ai-sdk/openai-compatible` emits it; parts are replayed from the session DB
+   each step).
+2. `reasoning-preserve = true` in `models.ini` makes llama-server's template
+   keep that reasoning for **all** history turns (Qwen3.6 calls this
+   `preserve_thinking` and recommends it for agents). Support is auto-detected
+   per template — llama-server logs "chat template supports preserving
+   reasoning" when available — and the key is harmless for non-thinking models.
+
+Side benefit: with thinking preserved, the rendered prompt is append-only across
+turns, so the KV prefix cache stays hot instead of re-evaluating the tail of the
+conversation every step.
+
+Sampling for llamastack models is **owned by `models.ini`** (`temp`, `top-p`,
+`top-k`, `min-p` keys — the Qwen3.6 sections use the official "precise coding"
+values 0.6/0.95/20/0). opencode deliberately sends no sampler overrides for this
+provider (`provider/transform.ts`), so the `/config` temperature field and any
+hand-edited INI values actually take effect.
 
 ### `/config` — in-TUI model settings screen
 

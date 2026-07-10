@@ -23,7 +23,9 @@ const STARTUP_TIMEOUT = 10_000
 const POLL_INTERVAL = 500
 
 const DEFAULT_CONTEXT = 32_768
-const DEFAULT_OUTPUT = 8_192
+// thinking models spend reasoning tokens from the output budget; 8k truncates
+// mid-plan on hard tickets. capped at half the context for small-ctx presets.
+const DEFAULT_OUTPUT = 32_768
 
 type DiscoveredModel = {
   id: string
@@ -80,6 +82,8 @@ const PRESET_HEADER = [
   "#   cache-type-v = q8_0",
   "#   flash-attn = on",
   "#   temp = 0.7                sampling temperature",
+  "#   reasoning-preserve = true keep <think> blocks in multi-turn history —",
+  "#                             thinking models loop/repeat tool calls without it",
   "# Changes apply on next model load (restart the router or swap models).",
 ].join("\n")
 
@@ -140,6 +144,9 @@ async function generatePresets(): Promise<string | undefined> {
             `cache-type-v = q8_0`,
             `jinja = true`,
             `cache-ram = 2048`,
+            // thinking models loop without their reasoning in history; the flag
+            // is capability-gated per template, so it is safe for non-thinkers
+            `reasoning-preserve = true`,
           ].join("\n"),
         )
       }
@@ -236,7 +243,7 @@ function toModel(providerID: ProviderV2.ID, baseURL: string, discovered: Discove
     headers: {},
     options: {},
     cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-    limit: { context, output: Math.min(DEFAULT_OUTPUT, context) },
+    limit: { context, output: Math.min(DEFAULT_OUTPUT, Math.floor(context / 2)) },
     capabilities: {
       temperature: true,
       reasoning: false,

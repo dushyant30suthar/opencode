@@ -517,6 +517,9 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
 }
 
 export function temperature(model: Provider.Model) {
+  // llamastack samplers live in models.ini presets; sending a value here would
+  // override them on every request (and dead-end the /config temperature field)
+  if (model.providerID === "llamastack") return undefined
   const id = model.id.toLowerCase()
   if (id.includes("north-mini-code")) return 1.0
   if (id.includes("qwen")) return 0.55
@@ -536,6 +539,7 @@ export function temperature(model: Provider.Model) {
 }
 
 export function topP(model: Provider.Model) {
+  if (model.providerID === "llamastack") return undefined
   const id = model.id.toLowerCase()
   if (id.includes("qwen")) return 1
   if (["minimax-m2", "gemini", "kimi-k2.5", "kimi-k2p5", "kimi-k2-5"].some((s) => id.includes(s))) {
@@ -545,6 +549,7 @@ export function topP(model: Provider.Model) {
 }
 
 export function topK(model: Provider.Model) {
+  if (model.providerID === "llamastack") return undefined
   const id = model.id.toLowerCase()
   if (id.includes("minimax-m2")) {
     if (["m2.", "m25", "m21"].some((s) => id.includes(s))) return 40
