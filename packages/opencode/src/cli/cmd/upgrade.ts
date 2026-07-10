@@ -3,6 +3,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { runStackUpgrade } from "./upgrade-stack"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
@@ -10,7 +11,7 @@ export const UpgradeCommand = {
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
-        describe: "version to upgrade to, for ex '0.1.48' or 'v0.1.48'",
+        describe: "version to upgrade to, for ex '0.1.48' or 'v0.1.48' — on llamastack fork builds: all | opencode | llama",
         type: "string",
       })
       .option("method", {
@@ -19,14 +20,24 @@ export const UpgradeCommand = {
         type: "string",
         choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
       })
+      .option("check", {
+        describe: "fork builds: only report upstream status, change nothing",
+        type: "boolean",
+      })
+      .option("yes", {
+        describe: "fork builds: skip the confirmation prompt",
+        type: "boolean",
+      })
   },
-  handler: async (args: { target?: string; method?: string }) => {
+  handler: async (args: { target?: string; method?: string; check?: boolean; yes?: boolean }) => {
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
     prompts.intro("Upgrade")
     if (Installation.isLlamaStackBuild()) {
-      prompts.log.warn(Installation.LLAMASTACK_UPGRADE_MESSAGE)
+      // Fork builds upgrade the whole local stack from source instead of
+      // downloading a stock binary (which would wipe the fork).
+      await runStackUpgrade(args)
       prompts.outro("Done")
       return
     }
