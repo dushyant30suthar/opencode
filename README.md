@@ -1,4 +1,4 @@
-> **Fork note:** this is the `llamastack` fork — opencode with a built-in zero-config local-model stack (llama.cpp router, LM Studio model dir, in-TUI `/config`). See [FORK.md](FORK.md).
+> **Fork note:** opencode with a built-in zero-config local llama.cpp stack — the frontend component of [opencode-llama.cpp](https://github.com/dushyant30suthar/opencode-llama.cpp), where all documentation lives. Working branch: `opencode-llama.cpp`.
 
 <p align="center">
   <a href="https://opencode.ai">
