@@ -55,9 +55,14 @@ export function isLocal() {
 /**
  * Custom llamastack fork builds must never self-update: the updater would
  * overwrite the fork binary with stock upstream. Update by rebuilding the fork.
+ * Matches both the historical branch name (llamastack) and the current one
+ * (opencode-llama.cpp) — the build stamps the branch into the version string.
  */
 export function isLlamaStackBuild() {
-  return InstallationChannel === "llamastack" || InstallationVersion.includes("llamastack")
+  for (const marker of ["llamastack", "opencode-llama.cpp"]) {
+    if (InstallationChannel === marker || InstallationVersion.includes(marker)) return true
+  }
+  return false
 }
 
 export const LLAMASTACK_UPGRADE_MESSAGE = "custom llamastack build — update by rebuilding the fork"
