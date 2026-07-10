@@ -1,4 +1,4 @@
-# The llamastack fork
+# The opencode-llama.cpp fork
 
 This is opencode with a built-in, zero-config local-model stack for this machine
 (2× RTX 5060 Ti 16GB). One binary: launch `opencode`, local models are in the

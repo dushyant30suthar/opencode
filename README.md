@@ -1,4 +1,4 @@
-> **Fork note:** this is the `llamastack` fork — opencode with a built-in zero-config local-model stack (llama.cpp router, LM Studio model dir, in-TUI `/config`). See [LLAMASTACK.md](LLAMASTACK.md).
+> **Fork note:** this is the `llamastack` fork — opencode with a built-in zero-config local-model stack (llama.cpp router, LM Studio model dir, in-TUI `/config`). See [FORK.md](FORK.md).
 
 <p align="center">
   <a href="https://opencode.ai">
