@@ -1,6 +1,6 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show } from "solid-js"
 import { useLocal } from "../../context/local"
 import * as LlamaStack from "../../util/llamastack"
 
@@ -61,6 +61,39 @@ function View(props: { api: TuiPluginApi }) {
 
   const endpoint = createMemo(() => LlamaStack.endpointURL(LlamaStack.serverSettings()?.expose ?? true))
 
+  // Web access: the sidebar line doubles as the toggle. `busy` covers the ~10s
+  // cloudflared takes to be assigned a hostname, so the row isn't just blank.
+  const webOn = createMemo(() => LlamaStack.serverSettings()?.web ?? false)
+  const webUrl = createMemo(() => LlamaStack.tunnelURL())
+  const [busy, setBusy] = createSignal(false)
+
+  // reconcile on mount: settings say web is on but no live tunnel (e.g. after a
+  // reboot killed cloudflared) -> bring it back up.
+  createEffect(() => {
+    if (!active() || !webOn() || busy() || webUrl()) return
+    void toggleWeb(true)
+  })
+
+  async function toggleWeb(on: boolean) {
+    if (busy()) return
+    setBusy(true)
+    try {
+      await LlamaStack.setWebAccess(on)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const webLine = createMemo(() => {
+    if (busy()) return webOn() ? "web: starting…" : "web: stopping…"
+    if (!webOn()) return "web: off (click to enable)"
+    return webUrl() ?? "web: unavailable (cloudflared missing?)"
+  })
+
+  // Shown so the endpoint is usable from ANY OpenAI-compatible client — Claude
+  // Code, Cursor, curl — not just this one. Bearer auth, so: base URL + key.
+  const apiKey = createMemo(() => LlamaStack.serverSettings()?.apiKey)
+
   return (
     <Show when={active()}>
       <box>
@@ -70,6 +103,20 @@ function View(props: { api: TuiPluginApi }) {
         <text fg={theme().textMuted} wrapMode="none">
           {endpoint()}
         </text>
+        <text
+          fg={webOn() && webUrl() ? theme().text : theme().textMuted}
+          wrapMode="none"
+          onMouseUp={() => void toggleWeb(!webOn())}
+        >
+          {webLine()}
+        </text>
+        <Show when={apiKey()}>
+          {(key) => (
+            <text fg={theme().textMuted} wrapMode="none">
+              {`key: ${key()}`}
+            </text>
+          )}
+        </Show>
         <Show when={info()}>
           {(item) => (
             <>

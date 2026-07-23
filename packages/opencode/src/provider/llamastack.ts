@@ -73,7 +73,11 @@ function parseModels(body: unknown): DiscoveredModel[] {
 /** Resolves to undefined when the server is unreachable, [] when reachable with no models. */
 async function listModels(baseURL: string, timeout: number): Promise<DiscoveredModel[] | undefined> {
   try {
-    const res = await fetch(`${baseURL}/models`, { signal: AbortSignal.timeout(timeout) })
+    const key = await routerApiKey()
+    const res = await fetch(`${baseURL}/models`, {
+      signal: AbortSignal.timeout(timeout),
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+    })
     if (!res.ok) return undefined
     return parseModels(await res.json())
   } catch {
@@ -191,6 +195,23 @@ async function routerHost(): Promise<string> {
   return "0.0.0.0"
 }
 
+/**
+ * Router API key from the same sidecar, minted by the TUI. Empty when unset
+ * (fresh install that has not opened the TUI yet) — the router then runs open,
+ * exactly as it did before this existed.
+ *
+ * llama-server takes it as --api-key and enforces OpenAI-style bearer auth, so
+ * any client works: opencode, Claude Code, curl, LM Studio.
+ */
+async function routerApiKey(): Promise<string> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(STATE_DIR, "server.json"), "utf8"))
+    return typeof parsed?.apiKey === "string" ? parsed.apiKey : ""
+  } catch {
+    return ""
+  }
+}
+
 async function spawnRouter(): Promise<boolean> {
   const stat = await fs.stat(LLAMA_SERVER_BIN).catch(() => undefined)
   if (!stat?.isFile()) return false
@@ -211,6 +232,7 @@ async function spawnRouter(): Promise<boolean> {
         await routerHost(),
         "--port",
         "9337",
+        ...((await routerApiKey()) ? ["--api-key", await routerApiKey()] : []),
       ],
       {
         detached: true,
@@ -310,8 +332,9 @@ async function toInfo(baseURL: string, discovered: DiscoveredModel[]): Promise<I
     name: "Llama Stack (local)",
     source: "custom",
     env: [],
-    // The local server takes any key; the SDK just needs one to be present.
-    options: { baseURL, apiKey: "llamastack" },
+    // Real key when the router is authenticated; the old placeholder otherwise
+    // (the SDK requires *some* value, and an open router ignores it).
+    options: { baseURL, apiKey: (await routerApiKey()) || "llamastack" },
     models,
   }
 }

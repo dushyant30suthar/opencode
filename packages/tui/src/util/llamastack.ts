@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "fs"
 import os from "os"
 import path from "path"
 import { spawn } from "child_process"
+import { randomBytes } from "crypto"
 import { createSignal } from "solid-js"
 
 /**
@@ -38,6 +39,20 @@ const STATE_DIR = path.join(os.homedir(), ".local", "state", "llamastack")
 export const PRESET_PATH = path.join(STATE_DIR, "models.ini")
 export const SERVER_SETTINGS_PATH = path.join(STATE_DIR, "server.json")
 export const PID_PATH = path.join(STATE_DIR, "router.pid")
+export const TUNNEL_PID_PATH = path.join(STATE_DIR, "tunnel.pid")
+export const TUNNEL_LOG_PATH = path.join(STATE_DIR, "tunnel.log")
+export const TUNNEL_URL_PATH = path.join(STATE_DIR, "tunnel.url")
+
+/** cloudflared binary: $LLAMASTACK_CLOUDFLARED_BIN, then $PATH, then conventional locations. */
+export const CLOUDFLARED_BIN = resolveCloudflaredBin()
+
+function resolveCloudflaredBin(): string {
+  const override = process.env["LLAMASTACK_CLOUDFLARED_BIN"]
+  if (override) return override
+  const candidates = [...(process.env["PATH"] || "").split(path.delimiter).filter(Boolean), "/usr/local/bin", "/usr/bin"]
+    .map((dir) => path.join(dir, "cloudflared"))
+  return candidates.find((bin) => existsSync(bin)) ?? candidates[candidates.length - 1]
+}
 
 const PRESET_HEADER = [
   "version = 1",
@@ -304,15 +319,55 @@ export async function reloadRouter(): Promise<boolean> {
 export type ServerSettings = {
   /** Bind the router to 0.0.0.0 so other machines on the LAN can use it. */
   expose: boolean
+  /**
+   * Publish the router through a Cloudflare quick tunnel, reachable from
+   * anywhere. Off by default — see apiKey below for why that matters.
+   */
+  web: boolean
+  /**
+   * Router API key, passed to llama-server as --api-key.
+   *
+   * ROTATED ON EVERY web-enable: a quick tunnel's URL becomes public the moment
+   * its TLS cert hits the certificate-transparency logs, so the URL is not a
+   * secret and the key is the only real control. Minting a fresh one per
+   * hosting session means a leaked URL+key pair dies with that session instead
+   * of granting standing access.
+   *
+   * Cost of that choice: --api-key is a spawn flag, so rotating it restarts the
+   * router (and reloads the model). That is why it rotates on hosting, not on
+   * every read.
+   */
+  apiKey: string
 }
 
-/** Global router settings sidecar (~/.local/state/llamastack/server.json). Default: exposed. */
+/** Generated once; base64url so it is safe in a header and easy to copy. */
+function generateApiKey(): string {
+  return randomBytes(24).toString("base64url")
+}
+
+/** Global router settings sidecar (~/.local/state/llamastack/server.json). Default: LAN yes, web no. */
 export async function loadServerSettings(): Promise<ServerSettings> {
   try {
     const parsed = JSON.parse(await fs.readFile(SERVER_SETTINGS_PATH, "utf8"))
-    return { expose: typeof parsed?.expose === "boolean" ? parsed.expose : true }
+    return {
+      expose: typeof parsed?.expose === "boolean" ? parsed.expose : true,
+      web: typeof parsed?.web === "boolean" ? parsed.web : false,
+      // deliberately NOT minted here: a key exists only while hosting, so
+      // LAN-only setups keep working unauthenticated exactly as before.
+      apiKey: typeof parsed?.apiKey === "string" ? parsed.apiKey : "",
+    }
   } catch {
-    return { expose: true }
+    return { expose: true, web: false, apiKey: "" }
+  }
+}
+
+/** Synchronous read for spawn paths that cannot await. Returns "" when unset. */
+export function apiKeySync(): string {
+  try {
+    const parsed = JSON.parse(readFileSync(SERVER_SETTINGS_PATH, "utf8"))
+    return typeof parsed?.apiKey === "string" ? parsed.apiKey : ""
+  } catch {
+    return ""
   }
 }
 
@@ -384,6 +439,9 @@ async function spawnRouterProcess(expose: boolean): Promise<boolean> {
         expose ? "0.0.0.0" : "127.0.0.1",
         "--port",
         `${ROUTER_PORT}`,
+        // OpenAI-compatible bearer auth, so ANY client (opencode, Claude Code,
+        // curl, LM Studio) works with just base URL + key.
+        ...(apiKeySync() ? ["--api-key", apiKeySync()] : []),
       ],
       {
         detached: true,
@@ -430,6 +488,145 @@ export async function restartRouter(expose: boolean): Promise<"restarted" | "not
   }
   await fs.rm(PID_PATH, { force: true }).catch(() => {})
   return (await spawnRouterProcess(expose)) ? "restarted" : "failed"
+}
+
+/* ------------------------------------------------------------------ *
+ * Cloudflare quick tunnel — publishes the router on a public URL.
+ *
+ * Deliberately a *quick* tunnel (no Cloudflare account, no domain): the URL is
+ * random and ephemeral, which is the whole security model. The router itself
+ * has no API key and CORS "*", so treat the URL as a credential. Off unless the
+ * user turns it on from the sidebar.
+ * ------------------------------------------------------------------ */
+
+const [tunnelUrlSignal, setTunnelUrlSignal] = createSignal<string | undefined>()
+let tunnelUrlRequested = false
+
+/** Reactive tunnel URL; lazily read from disk on first access. Undefined when off. */
+export function tunnelURL(): string | undefined {
+  if (!tunnelUrlRequested) {
+    tunnelUrlRequested = true
+    void readTunnelURL().then(setTunnelUrlSignal)
+  }
+  return tunnelUrlSignal()
+}
+
+async function readTunnelURL(): Promise<string | undefined> {
+  // a stale url file outlives a crashed cloudflared, so require a live pid too
+  if (!(await tunnelPid())) return undefined
+  const raw = await fs.readFile(TUNNEL_URL_PATH, "utf8").catch(() => "")
+  const url = raw.trim()
+  return url.startsWith("https://") ? url : undefined
+}
+
+async function tunnelPid(): Promise<number | undefined> {
+  const raw = await fs.readFile(TUNNEL_PID_PATH, "utf8").catch(() => "")
+  const pid = Number.parseInt(raw.trim(), 10)
+  if (!Number.isInteger(pid) || pid <= 0) return undefined
+  try {
+    process.kill(pid, 0)
+    return pid
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Start a quick tunnel to the router and return its public URL.
+ *
+ * cloudflared only announces the assigned hostname in its log, so we spawn it
+ * detached against a logfile and poll that file until the URL appears.
+ */
+export async function startTunnel(): Promise<string | undefined> {
+  const existing = await readTunnelURL()
+  if (existing) return existing
+  if (!existsSync(CLOUDFLARED_BIN)) return undefined
+  await fs.mkdir(STATE_DIR, { recursive: true }).catch(() => {})
+  await fs.rm(TUNNEL_URL_PATH, { force: true }).catch(() => {})
+  await fs.writeFile(TUNNEL_LOG_PATH, "").catch(() => {})
+  const log = await fs.open(TUNNEL_LOG_PATH, "a").catch(() => undefined)
+  try {
+    const child = spawn(
+      CLOUDFLARED_BIN,
+      ["tunnel", "--no-autoupdate", "--url", `http://127.0.0.1:${ROUTER_PORT}`],
+      { detached: true, stdio: ["ignore", log?.fd ?? "ignore", log?.fd ?? "ignore"] },
+    )
+    child.on("error", () => {})
+    child.unref()
+    if (!child.pid) return undefined
+    await fs.writeFile(TUNNEL_PID_PATH, `${child.pid}\n`).catch(() => {})
+    const url = await waitForTunnelURL()
+    if (!url) {
+      await stopTunnel()
+      return undefined
+    }
+    await fs.writeFile(TUNNEL_URL_PATH, `${url}\n`).catch(() => {})
+    setTunnelUrlSignal(url)
+    return url
+  } catch {
+    return undefined
+  } finally {
+    await log?.close().catch(() => {})
+  }
+}
+
+async function waitForTunnelURL(): Promise<string | undefined> {
+  const deadline = Date.now() + 25_000
+  while (Date.now() < deadline) {
+    const log = await fs.readFile(TUNNEL_LOG_PATH, "utf8").catch(() => "")
+    const match = log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i)
+    if (match) return match[0]
+    await new Promise((resolve) => setTimeout(resolve, 400))
+  }
+  return undefined
+}
+
+/** Stop the tunnel and clear its sidecars. Safe to call when already stopped. */
+export async function stopTunnel(): Promise<void> {
+  const pid = await tunnelPid()
+  if (pid) {
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch {}
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      try {
+        process.kill(pid, 0)
+      } catch {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {}
+  }
+  await fs.rm(TUNNEL_PID_PATH, { force: true }).catch(() => {})
+  await fs.rm(TUNNEL_URL_PATH, { force: true }).catch(() => {})
+  setTunnelUrlSignal(undefined)
+}
+
+/**
+ * Flip web access and persist it. Returns the public URL when switching on.
+ *
+ * Switching ON mints a FRESH api key and restarts the router so it enforces it,
+ * then brings the tunnel up — one hosting session, one credential. Switching
+ * OFF drops the tunnel and rotates the key again, so the pair handed out during
+ * that session stops working the moment you unhost.
+ */
+export async function setWebAccess(on: boolean): Promise<string | undefined> {
+  const current = await loadServerSettings()
+  // fresh credential per hosting session; cleared again on unhost so the router
+  // goes back to open on the LAN and the old key stops working everywhere.
+  const apiKey = on ? generateApiKey() : ""
+  await saveServerSettings({ ...current, web: on, apiKey })
+  // --api-key is a spawn flag, so the router has to come back up to pick it up
+  await restartRouter(current.expose)
+  if (!on) {
+    await stopTunnel()
+    return undefined
+  }
+  return await startTunnel()
 }
 
 export type LoadedModel = {

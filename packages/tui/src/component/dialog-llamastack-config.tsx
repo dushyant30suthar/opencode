@@ -394,7 +394,11 @@ function DialogLlamaStackServer() {
   }))
 
   async function save() {
-    const next = { expose: expose() }
+    // `web` and `apiKey` are owned elsewhere (sidebar toggle / generated once) —
+    // carry them through so saving the LAN setting doesn't tear down a live
+    // tunnel or rotate the key out from under connected clients.
+    const current = LlamaStack.serverSettings()
+    const next = { expose: expose(), web: current?.web ?? false, apiKey: current?.apiKey ?? "" }
     try {
       await LlamaStack.saveServerSettings(next)
     } catch (error) {
